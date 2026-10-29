@@ -1,0 +1,2 @@
+// Endereço do Apps Script (implantação "App da Web") que grava no Drive.
+window.VISTORIAS_API = 'https://script.google.com/macros/s/AKfycbxLTCXthHx_Can8SQcoXDvfmpyNnDbMZ5wMFKg9OFn8WIMPByzfRctqOhUjQlthhCGk9Q/exec';

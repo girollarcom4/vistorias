@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f2f4a">
+<title>Vistorias Girollar</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icone-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+  :root{--navy:#1f2f4a;--laranja:#e8731a;--ok:#15803d;--bad:#b91c1c;--cinza:#6b7280;--linha:#e5e7eb;--fundo:#f3f4f6}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0}
+  body{font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;background:var(--fundo);padding-bottom:env(safe-area-inset-bottom)}
+  header.topo{position:sticky;top:0;z-index:10;background:var(--navy);color:#fff;display:flex;align-items:center;gap:10px;padding:10px 12px;padding-top:calc(10px + env(safe-area-inset-top))}
+  header.topo h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header.topo img{height:26px}
+  .voltar{background:none;border:0;color:#fff;font-size:22px;padding:2px 8px;cursor:pointer}
+  #sync{font-size:12px;opacity:.9;text-align:right;line-height:1.2;cursor:pointer;border:0;background:none;color:#fff}
+  main{max-width:640px;margin:0 auto;padding:12px}
+  .card{background:#fff;border:1px solid var(--linha);border-radius:12px;padding:12px;margin-bottom:10px}
+  .card.tap{cursor:pointer} .card.tap:active{background:#f9fafb}
+  .linha{display:flex;align-items:center;gap:8px} .esp{flex:1;min-width:0}
+  .mudo{color:var(--cinza);font-size:13px} .neg{font-weight:600}
+  .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;background:#e5e7eb;color:#374151}
+  .pill.bad{background:#fee2e2;color:var(--bad)} .pill.ok{background:#dcfce7;color:var(--ok)} .pill.lar{background:#ffedd5;color:#c2410c}
+  button.pri{background:var(--laranja);color:#fff;border:0;border-radius:10px;padding:13px 16px;font:inherit;font-weight:700;width:100%;cursor:pointer}
+  button.sec{background:#fff;color:var(--navy);border:1.5px solid var(--navy);border-radius:10px;padding:11px 14px;font:inherit;font-weight:600;cursor:pointer}
+  button.peq{background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:8px 11px;font:inherit;font-size:14px;cursor:pointer}
+  button.perigo{color:var(--bad);border-color:#fca5a5}
+  label{display:block;font-size:13px;color:var(--cinza);margin:10px 0 3px}
+  input[type=text],select,textarea{width:100%;font:inherit;padding:11px;border:1.5px solid #d1d5db;border-radius:10px;background:#fff}
+  textarea{min-height:76px;resize:vertical}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--laranja)}
+  .seg{display:flex;gap:6px} .seg button{flex:1;padding:10px 4px;border:1.5px solid #d1d5db;background:#fff;border-radius:10px;font:inherit;font-weight:600;cursor:pointer}
+  .seg button.on{color:#fff;border-color:transparent}
+  .seg .s-ok.on{background:var(--ok)} .seg .s-bad.on{background:var(--bad)} .seg .s-na.on{background:#6b7280} .seg .s-t.on{background:var(--navy)}
+  .item{border-top:1px solid var(--linha);padding:10px 0} .item:first-child{border-top:0}
+  .item .nome{font-weight:600;margin-bottom:6px}
+  .defeito{background:#fef2f2;border-radius:10px;padding:8px;margin-top:8px}
+  .fotos{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .fotos .f{position:relative} .fotos img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #d1d5db;background:#e5e7eb;display:block}
+  .fotos .x{position:absolute;top:-6px;right:-6px;width:24px;height:24px;border-radius:50%;border:0;background:var(--bad);color:#fff;font-size:14px;line-height:24px;padding:0;cursor:pointer}
+  .acoes{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  canvas.assin{width:100%;height:150px;background:#fff;border:1.5px dashed #9ca3af;border-radius:10px;touch-action:none}
+  .vazio{text-align:center;color:var(--cinza);padding:30px 10px}
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  #modal.on{display:flex} #modal .caixa{background:#fff;border-radius:14px;padding:18px;max-width:340px;width:100%}
+  .aviso{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:9px 11px;font-size:13px;margin-bottom:10px}
+  .alerta{background:#fee2e2;border:1.5px solid #fca5a5;color:#991b1b;border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px;font-weight:600}
+  .seg .s-rev.on{background:var(--ok)} .seg .s-par.on{background:#c2410c} .seg .s-nao.on{background:var(--bad)}
+  .antes{background:#f9fafb;border-left:3px solid #9ca3af;padding:6px 8px;border-radius:6px;font-size:14px;margin-bottom:8px}
+  iframe.rel{width:100%;height:calc(100vh - 130px);border:1px solid var(--linha);border-radius:10px;background:#fff}
+  h2.sec{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--cinza);margin:18px 2px 8px}
+</style>
+</head>
+<body>
+<header class="topo" id="topo"></header>
+<main id="tela"></main>
+<div id="modal"><div class="caixa" id="modalCorpo"></div></div>
+<input type="file" id="inCamera" accept="image/*" capture="environment" hidden>
+<input type="file" id="inGaleria" accept="image/*" multiple hidden>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script src="relatorio.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
