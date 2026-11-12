@@ -36,6 +36,38 @@ let perfil = (() => {
   try { return JSON.parse(localStorage.getItem('perfilGirollar')) || null; } catch { return null; }
 })();
 
+// Pendência de obra: algo a resolver, com responsável e prazo. Pode nascer de um defeito de vistoria
+// (guarda a origem e aponta para as fotos dela, sem copiar).
+const STATUS_PEND = { aberta: 'Aberta', andamento: 'Em andamento', resolvida: 'Resolvida' };
+const EM_OBRA = ['diario', 'pendencia']; // tipos que vivem na aba Obra, não na lista de vistorias
+const atrasada = (p) => p.tipo === 'pendencia' && p.status !== 'resolvida' && p.prazo && p.prazo < hojeISO();
+function novaPendencia({ empreendimento, unidade, titulo, descricao, por, papel, origem, fotosOrigem }) {
+  return {
+    id: uid(),
+    tipo: 'pendencia',
+    empreendimento,
+    unidade: unidade || '',
+    titulo: titulo || '',
+    descricao: descricao || '',
+    responsavel: '',
+    prazo: '',
+    status: 'aberta',
+    por,
+    papel,
+    origem: origem || null,
+    fotosOrigem: fotosOrigem || [],
+    criadoEm: agora(),
+    atualizadoEm: agora(),
+    resolvidaEm: '',
+    resolvidaPor: '',
+    concluida: false,
+    notas: [],
+    fotosGerais: [], // do problema
+    fotosDepois: [], // da solução
+    _sync: { sujo: true },
+  };
+}
+
 // Diário de obra: um registro por obra e dia. Mora no mesmo banco das vistorias (tipo 'diario'),
 // então reaproveita fotos, fila de envio e sincronização.
 function novoDiario({ empreendimento, data, por, papel }) {
@@ -203,7 +235,7 @@ async function comprimir(file) {
   g.drawImage(bmp, 0, 0, w, h);
   if (bmp.close) bmp.close();
   // Carimbo com unidade e data/hora: a foto vira prova do estado naquele momento.
-  const txt = `${vis.tipo === 'diario' ? vis.empreendimento : vis.unidade} · ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
+  const txt = `${vis.tipo === 'diario' ? vis.empreendimento : vis.tipo === 'pendencia' ? [vis.empreendimento, vis.unidade].filter(Boolean).join(' ') : vis.unidade} ·${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
   const fs = Math.max(14, Math.round(Math.max(w, h) * 0.022));
   g.font = `600 ${fs}px system-ui, sans-serif`;
   const tw = g.measureText(txt).width;
@@ -233,6 +265,7 @@ function listaDoAlvo(alvo) {
   if (alvo.t === 'geral') return vis.fotosGerais;
   if (alvo.t === 'rev') return vis.revisao.find((x) => x.id === alvo.i).fotos;
   if (alvo.t === 'novo') return vis.novos.find((x) => x.id === alvo.i).fotos;
+  if (alvo.t === 'depois') return vis.fotosDepois;
   if (alvo.t === 'serv') return vis.servicos.find((x) => x.id === alvo.i).fotos;
   if (alvo.t === 'oc') return vis.ocorrencias.find((x) => x.id === alvo.i).fotos;
   const a = vis.ambientes.find((x) => x.id === alvo.a);
@@ -559,35 +592,52 @@ const cardDiario = (v, acao) => `<div class="card tap" data-act="${acao}" data-i
     ${v.servicos ? `<div class="linha" style="margin-top:8px"><span class="mudo esp">${v.servicos.length} serviço(s) · ${v.ocorrencias.length} ocorrência(s)</span>
       <span class="pill ${v._sync && v._sync.sujo ? '' : 'ok'}">${v._sync && v._sync.sujo ? 'a enviar' : '✓ no Drive'}</span></div>` : ''}</div>`;
 
+const cardPend = (v, acao) => `<div class="card tap" data-act="${acao}" data-id="${v.id}">
+    <div class="linha"><div class="esp"><div class="neg">${esc(v.titulo || 'Sem título')}</div>
+      <div class="mudo">${esc(v.empreendimento)}${v.unidade ? ' · ' + esc(v.unidade) : ''}${v.responsavel ? ' · resp.: ' + esc(v.responsavel) : ''}</div></div>
+      <span class="pill ${v.status === 'resolvida' ? 'ok' : atrasada(v) ? 'bad' : 'lar'}">${atrasada(v) ? 'atrasada' : STATUS_PEND[v.status] || v.status}</span></div>
+    <div class="linha" style="margin-top:8px"><span class="mudo esp">${v.prazo ? 'prazo ' + fmtDia(v.prazo) : 'sem prazo'} · ${esc(v.por)}</span>
+      ${v._sync ? `<span class="pill ${v._sync.sujo ? '' : 'ok'}">${v._sync.sujo ? 'a enviar' : '✓ no Drive'}</span>` : ''}</div></div>`;
+const ordemPend = (a, b) => (a.status === 'resolvida') - (b.status === 'resolvida') || (a.prazo || '9999').localeCompare(b.prazo || '9999');
+
 async function telaObra() {
   topo({ titulo: 'Obra' });
-  const dias = (await bdTodas()).filter((v) => v.tipo === 'diario')
+  const todos = await bdTodas();
+  const dias = todos.filter((v) => v.tipo === 'diario')
     .sort((a, b) => (b.data || '').localeCompare(a.data || '') || b.atualizadoEm.localeCompare(a.atualizadoEm));
+  const pends = todos.filter((v) => v.tipo === 'pendencia').sort(ordemPend);
+  const abertas = pends.filter((p) => p.status !== 'resolvida').length;
   $('#tela').innerHTML = `
     ${abas('obra')}
     ${await alertaEnvio()}
-    <h2 class="sec" style="margin-top:4px">Diário de obra</h2>
     <div class="card">
       <label style="margin-top:0">Obra</label>
       <input type="text" id="fObra" list="dlEmp" value="${esc(localStorage.getItem('ultimaObra') || '')}" placeholder="Escolha ou digite" autocomplete="off">
       <datalist id="dlEmp">${Object.keys(unidades).map((e) => `<option value="${esc(e)}">`).join('')}</datalist>
       <label>Data</label>
       <input type="date" id="fData" value="${hojeISO()}" style="width:100%;font:inherit;padding:10px;border:1.5px solid #d1d5db;border-radius:10px">
-      <div class="acoes"><button class="pri" data-act="criardiario">Abrir diário do dia</button></div>
+      <div class="acoes"><button class="pri" style="flex:1" data-act="criardiario">Diário do dia</button><button class="sec" style="flex:1" data-act="criarpend">+ Pendência</button></div>
     </div>
-    <h2 class="sec">Neste aparelho</h2>
+    <h2 class="sec">Pendências${abertas ? ` · ${abertas} em aberto` : ''}</h2>
+    ${pends.length ? pends.map((v) => cardPend(v, 'abrir')).join('') : '<div class="vazio">Nenhuma pendência neste aparelho.</div>'}
+    <h2 class="sec">Diários de obra</h2>
     ${dias.length ? dias.map((v) => cardDiario(v, 'abrir')).join('') : '<div class="vazio">Nenhum diário ainda.</div>'}
     <h2 class="sec">Equipe</h2>
-    <button class="sec" style="width:100%" data-act="equipeobra">Ver diários de todos (precisa de sinal)</button>`;
+    <button class="sec" style="width:100%" data-act="equipeobra">Ver pendências e diários de todos (precisa de sinal)</button>`;
 }
 
 async function telaEquipeObra() {
-  topo({ titulo: 'Diários da equipe', voltar: true });
+  topo({ titulo: 'Obra · equipe', voltar: true });
   $('#tela').innerHTML = '<div class="vazio">Carregando…</div>';
   if (!Api.temToken()) { pedirCodigo(); $('#tela').innerHTML = '<div class="vazio">Digite o código da equipe.</div>'; return; }
   try {
-    const lista = ((await Api.listarObra()).diarios || []).sort((a, b) => (b.data || '').localeCompare(a.data || ''));
-    $('#tela').innerHTML = lista.length ? lista.map((v) => cardDiario(v, 'remotodiario')).join('') : '<div class="vazio">Nada enviado ainda.</div>';
+    const r = await Api.listarObra();
+    const lista = (r.diarios || []).sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+    const pends = (r.pendencias || []).sort(ordemPend);
+    $('#tela').innerHTML = `<h2 class="sec" style="margin-top:4px">Pendências</h2>
+      ${pends.length ? pends.map((v) => cardPend(v, 'remotodiario')).join('') : '<div class="vazio">Nenhuma enviada ainda.</div>'}
+      <h2 class="sec">Diários de obra</h2>
+      ${lista.length ? lista.map((v) => cardDiario(v, 'remotodiario')).join('') : '<div class="vazio">Nenhum enviado ainda.</div>'}`;
   } catch (e) {
     if (e.codigo) { pedirCodigo(); return; }
     $('#tela').innerHTML = '<div class="aviso">Sem conexão com o servidor. Isso só funciona com sinal.</div>';
@@ -637,9 +687,42 @@ function telaDiario() {
     <div class="acoes"><button class="peq perigo" data-act="excluir">Excluir</button></div>`;
 }
 
+function telaPendencia() {
+  topo({ titulo: vis.titulo || 'Nova pendência', voltar: true });
+  const o = vis.origem;
+  const notas = vis.notas.map((n) => `<div class="antes"><span class="mudo">${new Date(n.em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${esc(n.por)}</span><br>${esc(n.texto)}</div>`).join('');
+  const dataInput = 'style="width:100%;font:inherit;padding:10px;border:1.5px solid #d1d5db;border-radius:10px"';
+  $('#tela').innerHTML = `
+    <div class="card"><div class="linha"><div class="esp"><div class="neg">${esc(vis.empreendimento)}</div>
+      <div class="mudo">aberta por ${esc(vis.por)}${vis.papel ? ' · ' + esc(PAPEIS[vis.papel] || '') : ''} em ${new Date(vis.criadoEm).toLocaleDateString('pt-BR')}</div></div>
+      <span class="pill ${vis.status === 'resolvida' ? 'ok' : atrasada(vis) ? 'bad' : 'lar'}">${atrasada(vis) ? 'atrasada' : STATUS_PEND[vis.status]}</span></div>
+      ${o ? `<div class="aviso" style="margin:10px 0 0">Nasceu da vistoria de ${esc(vis.unidade)}: ${esc(o.ambiente)} · ${esc(o.item)}</div>` : ''}
+      <label>O que precisa ser resolvido</label>
+      <input type="text" data-bind="pTitulo" value="${esc(vis.titulo)}" placeholder="Ex.: Infiltração na parede da sacada" autocomplete="off">
+      <label>Local / unidade</label>
+      <input type="text" data-bind="pLocal" value="${esc(vis.unidade)}" placeholder="Ex.: 1006 BLOCO 1, hall do 5º pav." autocomplete="off">
+      <label>Descrição</label>
+      <textarea data-bind="pDesc" placeholder="Detalhe o problema">${esc(vis.descricao)}</textarea>
+      ${fotosSoLeitura(vis.fotosOrigem)}
+      ${blocoFotos({ t: 'geral' }, vis.fotosGerais)}</div>
+    <h2 class="sec">Responsável e prazo</h2>
+    <div class="card">
+      <label style="margin-top:0">Responsável</label>
+      <input type="text" data-bind="pResp" value="${esc(vis.responsavel)}" placeholder="Quem vai resolver (nome ou empresa)" autocomplete="off">
+      <label>Prazo</label>
+      <input type="date" data-bind="pPrazo" value="${esc(vis.prazo)}" ${dataInput}></div>
+    <h2 class="sec">Andamento</h2>
+    <div class="card"><div class="seg">${Object.entries(STATUS_PEND).map(([k, r]) => `<button class="${k === 'resolvida' ? 's-rev' : k === 'andamento' ? 's-par' : 's-nao'} ${vis.status === k ? 'on' : ''}" data-act="statuspend" data-k="${k}">${r}</button>`).join('')}</div>
+      ${vis.status === 'resolvida' ? `<div class="mudo" style="margin-top:8px">Resolvida em ${new Date(vis.resolvidaEm).toLocaleDateString('pt-BR')}${vis.resolvidaPor ? ' por ' + esc(vis.resolvidaPor) : ''}</div>
+        <label>Foto da solução</label>${blocoFotos({ t: 'depois' }, vis.fotosDepois)}` : ''}
+      <div style="margin-top:10px">${notas}</div>
+      <div class="acoes"><button class="peq" data-act="novanota">+ Anotar andamento</button></div></div>
+    <div class="acoes"><button class="peq perigo" data-act="excluir">Excluir</button></div>`;
+}
+
 async function telaLista() {
   topo({ titulo: 'Vistorias' });
-  const todas = (await bdTodas()).filter((v) => v.tipo !== 'diario').sort((a, b) => b.atualizadoEm.localeCompare(a.atualizadoEm));
+  const todas = (await bdTodas()).filter((v) => !EM_OBRA.includes(v.tipo)).sort((a, b) => b.atualizadoEm.localeCompare(a.atualizadoEm));
   const cards = todas.map((v) => {
     const sujo = v._sync && v._sync.sujo;
     return `<div class="card tap" data-act="abrir" data-id="${v.id}">
@@ -724,6 +807,7 @@ function ligarAssinaturas() {
 
 function telaVistoria() {
   if (vis.tipo === 'diario') return telaDiario();
+  if (vis.tipo === 'pendencia') return telaPendencia();
   if (vis.tipo === 'revistoria') return telaRevistoria();
   const c = contar(vis);
   topo({ titulo: `${vis.empreendimento} · ${vis.unidade}`, voltar: true });
@@ -787,7 +871,8 @@ function telaAmbiente() {
         <button class="s-bad ${i.estado === 'defeito' ? 'on' : ''}" data-act="estado" data-i="${i.id}" data-e="defeito">✖ Defeito</button>
         <button class="s-na ${i.estado === 'na' ? 'on' : ''}" data-act="estado" data-i="${i.id}" data-e="na">— N/A</button>
       </div>
-      ${i.estado === 'defeito' ? `<div class="defeito"><textarea data-bind="item" data-i="${i.id}" placeholder="Descreva o defeito (onde, tamanho…)">${esc(i.obs)}</textarea>${blocoFotos({ t: 'item', a: a.id, i: i.id }, i.fotos)}</div>` : ''}
+      ${i.estado === 'defeito' ? `<div class="defeito"><textarea data-bind="item" data-i="${i.id}" placeholder="Descreva o defeito (onde, tamanho…)">${esc(i.obs)}</textarea>${blocoFotos({ t: 'item', a: a.id, i: i.id }, i.fotos)}
+        <div class="acoes">${i.pendenciaId ? '<span class="pill ok">✓ Pendência de obra criada</span>' : `<button class="peq" data-act="pendDeItem" data-i="${i.id}">→ Criar pendência de obra</button>`}</div></div>` : ''}
     </div>`);
   $('#tela').innerHTML = `
     <div class="card">${itens.join('')}
@@ -862,7 +947,7 @@ function ir(nome, extra = {}) {
 function voltar() {
   if (tela.nome === 'amb') { tela = { nome: 'vistoria' }; }
   else if (tela.nome === 'relatorio') { tela = tela.de || { nome: 'lista' }; }
-  else if (tela.nome === 'vistoria') { const dia = vis && vis.tipo === 'diario'; salvarAgora(); vis = null; tela = { nome: dia ? 'obra' : 'lista' }; }
+  else if (tela.nome === 'vistoria') { const dia = vis && EM_OBRA.includes(vis.tipo); salvarAgora(); vis = null; tela = { nome: dia ? 'obra' : 'lista' }; }
   else if (tela.nome === 'equipeobra') tela = { nome: 'obra' };
   else tela = { nome: 'lista' };
   desenhar();
@@ -910,6 +995,16 @@ document.addEventListener('click', async (e) => {
     const ja = (await bdTodas()).find((v) => v.tipo === 'diario' && v.empreendimento === emp && v.data === data);
     vis = ja || novoDiario({ empreendimento: emp, data, por: perfil.nome, papel: perfil.papel });
     if (!ja) { await bdPut(vis); agendarSync(); }
+    return ir('vistoria');
+  }
+  if (act === 'criarpend') {
+    const emp = $('#fObra').value.trim();
+    if (!emp) return alert('Escolha a obra.');
+    if (!perfil) return pedirPerfil(true);
+    localStorage.setItem('ultimaObra', emp);
+    vis = novaPendencia({ empreendimento: emp, por: perfil.nome, papel: perfil.papel });
+    await bdPut(vis);
+    agendarSync();
     return ir('vistoria');
   }
   if (act === 'remotodiario') {
@@ -982,6 +1077,39 @@ document.addEventListener('click', async (e) => {
     for (const f of it.fotos || []) await fotoDel(f);
     vis[campo] = vis[campo].filter((x) => x.id !== d.i);
     tocar();
+    return desenhar();
+  }
+  if (act === 'statuspend') {
+    vis.status = d.k;
+    vis.resolvidaEm = d.k === 'resolvida' ? agora() : '';
+    vis.resolvidaPor = d.k === 'resolvida' ? (perfil ? perfil.nome : vis.por) : '';
+    vis.concluida = false;
+    tocar();
+    return desenhar();
+  }
+  if (act === 'novanota') {
+    const texto = prompt('Anotação sobre o andamento:');
+    if (!texto || !texto.trim()) return;
+    vis.notas.push({ id: uid(), em: agora(), por: perfil ? perfil.nome : vis.por, texto: texto.trim() });
+    tocar();
+    return desenhar();
+  }
+  if (act === 'pendDeItem') {
+    // Defeito da vistoria vira pendência de obra; as fotos continuam na vistoria e são só referenciadas.
+    const a = vis.ambientes.find((x) => x.id === tela.a);
+    const i = a.itens.find((x) => x.id === d.i);
+    if (i.pendenciaId) return;
+    if (!perfil) return pedirPerfil(true);
+    const p = novaPendencia({
+      empreendimento: vis.empreendimento, unidade: vis.unidade, titulo: `${a.nome} · ${i.nome}`, descricao: i.obs,
+      por: perfil.nome, papel: perfil.papel, origem: { vid: vis.id, ambiente: a.nome, item: i.nome, itemId: i.id },
+      fotosOrigem: i.fotos.map((fid) => ({ vid: vis.id, fid })),
+    });
+    i.pendenciaId = p.id;
+    tocar();
+    await salvarAgora();
+    await bdPut(p);
+    agendarSync();
     return desenhar();
   }
   if (act === 'fechardia') {
@@ -1065,8 +1193,8 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'excluir') {
     const enviada = vis._sync && !vis._sync.sujo;
-    const dia = vis.tipo === 'diario';
-    const que = dia ? 'este diário' : 'esta vistoria';
+    const dia = EM_OBRA.includes(vis.tipo);
+    const que = vis.tipo === 'diario' ? 'este diário' : vis.tipo === 'pendencia' ? 'esta pendência' : 'esta vistoria';
     if (!confirm(enviada ? `Excluir ${que} deste aparelho? (A cópia no Drive permanece.)` : `ATENÇÃO: ${que} ainda NÃO foi enviado(a) ao Drive. Excluir apaga de vez. Continuar?`)) return;
     await bdDel(vis.id);
     vis = null;
@@ -1085,6 +1213,11 @@ document.addEventListener('input', (e) => {
   else if (b === 'rev') vis.revisao.find((x) => x.id === t.dataset.i).obs = t.value;
   else if (b === 'novo') vis.novos.find((x) => x.id === t.dataset.i).obs = t.value;
   else if (b === 'data') vis.data = t.value;
+  else if (b === 'pTitulo') vis.titulo = t.value;
+  else if (b === 'pLocal') vis.unidade = t.value;
+  else if (b === 'pDesc') vis.descricao = t.value;
+  else if (b === 'pResp') vis.responsavel = t.value;
+  else if (b === 'pPrazo') vis.prazo = t.value;
   else if (b === 'efProprio') vis.efetivo.proprio = t.value;
   else if (b === 'efTerceiros') vis.efetivo.terceiros = t.value;
   else if (b === 'srvLocal') vis.servicos.find((x) => x.id === t.dataset.i).local = t.value;
