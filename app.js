@@ -26,6 +26,41 @@ const AMBIENTES = [
 ];
 const { contar, pendentesDe, relatorioHTML, fotosDoRelatorio, TIPO } = Relatorio;
 
+// ---------- obra: perfis e diário ----------
+const PAPEIS = { vistoriador: 'Vistoriador', engenheiro: 'Engenheiro', mestre: 'Mestre de obras' };
+const CLIMAS = [['sol', '☀ Sol'], ['nublado', '⛅ Nublado'], ['chuva', '🌧 Chuva']];
+const TIPOS_OCORRENCIA = ['Ocorrência', 'Atraso', 'Falta de material', 'Segurança', 'Visita / fiscalização', 'Retrabalho'];
+const fmtDia = (d) => String(d || '').split('-').reverse().join('/');
+const hojeISO = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-DD no fuso do aparelho
+let perfil = (() => {
+  try { return JSON.parse(localStorage.getItem('perfilGirollar')) || null; } catch { return null; }
+})();
+
+// Diário de obra: um registro por obra e dia. Mora no mesmo banco das vistorias (tipo 'diario'),
+// então reaproveita fotos, fila de envio e sincronização.
+function novoDiario({ empreendimento, data, por, papel }) {
+  return {
+    id: uid(),
+    tipo: 'diario',
+    empreendimento,
+    unidade: '',
+    data,
+    por,
+    papel,
+    criadoEm: agora(),
+    atualizadoEm: agora(),
+    concluida: false,
+    fechado: false,
+    clima: { manha: null, tarde: null },
+    efetivo: { proprio: '', terceiros: '' },
+    servicos: [],
+    ocorrencias: [],
+    obsGerais: '',
+    fotosGerais: [],
+    _sync: { sujo: true },
+  };
+}
+
 const uid = () => {
   const b = new Uint8Array(8);
   crypto.getRandomValues(b);
@@ -120,7 +155,7 @@ const fotosTodas = () => tx('fotos', 'readonly', (s) => s.getAll());
 let vis = null; // vistoria aberta
 let tela = { nome: 'lista' };
 let unidades = {};
-let ultimoNome = localStorage.getItem('vistoriadoPor') || '';
+let ultimoNome = (perfil && perfil.nome) || localStorage.getItem('vistoriadoPor') || '';
 let alvoFoto = null;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -168,7 +203,7 @@ async function comprimir(file) {
   g.drawImage(bmp, 0, 0, w, h);
   if (bmp.close) bmp.close();
   // Carimbo com unidade e data/hora: a foto vira prova do estado naquele momento.
-  const txt = `${vis.unidade} · ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
+  const txt = `${vis.tipo === 'diario' ? vis.empreendimento : vis.unidade} · ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
   const fs = Math.max(14, Math.round(Math.max(w, h) * 0.022));
   g.font = `600 ${fs}px system-ui, sans-serif`;
   const tw = g.measureText(txt).width;
@@ -198,6 +233,8 @@ function listaDoAlvo(alvo) {
   if (alvo.t === 'geral') return vis.fotosGerais;
   if (alvo.t === 'rev') return vis.revisao.find((x) => x.id === alvo.i).fotos;
   if (alvo.t === 'novo') return vis.novos.find((x) => x.id === alvo.i).fotos;
+  if (alvo.t === 'serv') return vis.servicos.find((x) => x.id === alvo.i).fotos;
+  if (alvo.t === 'oc') return vis.ocorrencias.find((x) => x.id === alvo.i).fotos;
   const a = vis.ambientes.find((x) => x.id === alvo.a);
   if (alvo.t === 'amb') return a.fotos;
   return a.itens.find((x) => x.id === alvo.i).fotos;
@@ -387,10 +424,10 @@ async function alertaEnvio() {
   const presas = (await bdTodas()).filter((v) => v._sync && v._sync.sujo && Date.now() - new Date(v.atualizadoEm) > LIMITE);
   if (!presas.length) {
     if (!precisaCodigo || !(await pendentes()).vs.length) return '';
-    return `<div class="aviso">Há vistoria a enviar e falta o código da equipe. <button class="peq" data-act="sync">Digitar código</button></div>`;
+    return `<div class="aviso">Há registro a enviar e falta o código da equipe. <button class="peq" data-act="sync">Digitar código</button></div>`;
   }
   const motivo = precisaCodigo ? 'falta digitar o código da equipe' : !navigator.onLine ? 'o aparelho está sem internet' : ultimoErro ? `erro: ${esc(ultimoErro)}` : 'o envio não está passando';
-  return `<div class="alerta">⚠ ${presas.length ? `${presas.length} vistoria(s) ainda NÃO chegaram ao Drive` : 'Envio parado'} — ${motivo}.
+  return `<div class="alerta">⚠ ${presas.length ? `${presas.length} registro(s) ainda NÃO chegaram ao Drive` : 'Envio parado'} — ${motivo}.
     Não apague o app nem limpe os dados do navegador. <button class="peq" data-act="sync" style="margin-top:6px">Tentar enviar agora</button></div>`;
 }
 
@@ -481,9 +518,128 @@ function resumoItens(v) {
   return `${c.feitos}/${c.tot} itens${c.d ? ` · <b style="color:var(--bad)">${c.d} defeito(s)</b>` : ''}`;
 }
 
+function abas(atual) {
+  return `<div class="seg" style="margin-bottom:6px">
+      <button class="s-t ${atual === 'lista' ? 'on' : ''}" data-act="aba" data-aba="lista">Vistorias</button>
+      <button class="s-t ${atual === 'obra' ? 'on' : ''}" data-act="aba" data-aba="obra">Obra</button></div>
+    <div class="mudo" style="margin:0 2px 10px">👤 ${perfil ? `${esc(perfil.nome)} · ${PAPEIS[perfil.papel]}` : 'sem identificação'} <button class="peq" data-act="perfil">alterar</button></div>`;
+}
+
+function pedirPerfil(obrigatorio) {
+  const p = perfil || { nome: ultimoNome, papel: 'vistoriador' };
+  $('#modalCorpo').innerHTML = `
+    <h3 style="margin:0 0 6px">Quem é você?</h3>
+    <p class="mudo" style="margin:0 0 8px">Seu nome e função aparecem nos registros. Fica guardado neste aparelho.</p>
+    <label>Nome</label><input type="text" id="inNome" value="${esc(p.nome)}" autocomplete="off" placeholder="Seu nome">
+    <label>Função</label>
+    <select id="inPapel">${Object.entries(PAPEIS).map(([k, r]) => `<option value="${k}" ${p.papel === k ? 'selected' : ''}>${r}</option>`).join('')}</select>
+    <p id="erroPerfil" style="color:var(--bad);margin:6px 0 0;font-size:13px"></p>
+    <div class="acoes"><button class="pri" id="btPerfil">Salvar</button>${obrigatorio ? '' : '<button class="peq" id="btPerfilCancela">Cancelar</button>'}</div>`;
+  $('#modal').classList.add('on');
+  if ($('#btPerfilCancela')) $('#btPerfilCancela').onclick = () => $('#modal').classList.remove('on');
+  $('#btPerfil').onclick = () => {
+    const nome = $('#inNome').value.trim();
+    if (!nome) { $('#erroPerfil').textContent = 'Digite seu nome.'; return; }
+    const primeira = !perfil;
+    perfil = { nome, papel: $('#inPapel').value };
+    ultimoNome = nome;
+    localStorage.setItem('perfilGirollar', JSON.stringify(perfil));
+    localStorage.setItem('vistoriadoPor', nome);
+    $('#modal').classList.remove('on');
+    if (primeira && perfil.papel === 'mestre' && tela.nome === 'lista') tela = { nome: 'obra' };
+    desenhar();
+  };
+}
+
+// ---------- obra: lista de diários ----------
+const cardDiario = (v, acao) => `<div class="card tap" data-act="${acao}" data-id="${v.id}">
+    <div class="linha"><div class="esp"><div class="neg">${esc(v.empreendimento)} · ${fmtDia(v.data)}</div>
+      <div class="mudo">${esc(v.por)}${v.papel ? ' · ' + esc(PAPEIS[v.papel] || '') : ''}</div></div>
+      <span class="pill ${v.fechado ? 'ok' : 'lar'}">${v.fechado ? 'fechado' : 'em aberto'}</span></div>
+    ${v.servicos ? `<div class="linha" style="margin-top:8px"><span class="mudo esp">${v.servicos.length} serviço(s) · ${v.ocorrencias.length} ocorrência(s)</span>
+      <span class="pill ${v._sync && v._sync.sujo ? '' : 'ok'}">${v._sync && v._sync.sujo ? 'a enviar' : '✓ no Drive'}</span></div>` : ''}</div>`;
+
+async function telaObra() {
+  topo({ titulo: 'Obra' });
+  const dias = (await bdTodas()).filter((v) => v.tipo === 'diario')
+    .sort((a, b) => (b.data || '').localeCompare(a.data || '') || b.atualizadoEm.localeCompare(a.atualizadoEm));
+  $('#tela').innerHTML = `
+    ${abas('obra')}
+    ${await alertaEnvio()}
+    <h2 class="sec" style="margin-top:4px">Diário de obra</h2>
+    <div class="card">
+      <label style="margin-top:0">Obra</label>
+      <input type="text" id="fObra" list="dlEmp" value="${esc(localStorage.getItem('ultimaObra') || '')}" placeholder="Escolha ou digite" autocomplete="off">
+      <datalist id="dlEmp">${Object.keys(unidades).map((e) => `<option value="${esc(e)}">`).join('')}</datalist>
+      <label>Data</label>
+      <input type="date" id="fData" value="${hojeISO()}" style="width:100%;font:inherit;padding:10px;border:1.5px solid #d1d5db;border-radius:10px">
+      <div class="acoes"><button class="pri" data-act="criardiario">Abrir diário do dia</button></div>
+    </div>
+    <h2 class="sec">Neste aparelho</h2>
+    ${dias.length ? dias.map((v) => cardDiario(v, 'abrir')).join('') : '<div class="vazio">Nenhum diário ainda.</div>'}
+    <h2 class="sec">Equipe</h2>
+    <button class="sec" style="width:100%" data-act="equipeobra">Ver diários de todos (precisa de sinal)</button>`;
+}
+
+async function telaEquipeObra() {
+  topo({ titulo: 'Diários da equipe', voltar: true });
+  $('#tela').innerHTML = '<div class="vazio">Carregando…</div>';
+  if (!Api.temToken()) { pedirCodigo(); $('#tela').innerHTML = '<div class="vazio">Digite o código da equipe.</div>'; return; }
+  try {
+    const lista = ((await Api.listarObra()).diarios || []).sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+    $('#tela').innerHTML = lista.length ? lista.map((v) => cardDiario(v, 'remotodiario')).join('') : '<div class="vazio">Nada enviado ainda.</div>';
+  } catch (e) {
+    if (e.codigo) { pedirCodigo(); return; }
+    $('#tela').innerHTML = '<div class="aviso">Sem conexão com o servidor. Isso só funciona com sinal.</div>';
+  }
+}
+
+function telaDiario() {
+  topo({ titulo: `${vis.empreendimento} · ${fmtDia(vis.data)}`, voltar: true });
+  const clima = (p) => `<div class="seg">${CLIMAS.map(([k, r]) => `<button class="s-t ${vis.clima[p] === k ? 'on' : ''}" data-act="clima" data-p="${p}" data-k="${k}">${r}</button>`).join('')}</div>`;
+  const servs = vis.servicos.map((s) => `
+    <div class="item">
+      <div class="linha"><input type="text" class="esp" data-bind="srvLocal" data-i="${s.id}" value="${esc(s.local)}" placeholder="Local (ex.: Bloco 1, 5º pav.)" autocomplete="off">
+        <button class="peq perigo" data-act="rmserv" data-i="${s.id}">×</button></div>
+      <textarea data-bind="srvTexto" data-i="${s.id}" style="margin-top:6px" placeholder="Serviço executado (ex.: alvenaria 60% concluída)">${esc(s.texto)}</textarea>
+      ${blocoFotos({ t: 'serv', i: s.id }, s.fotos)}
+    </div>`);
+  const ocs = vis.ocorrencias.map((o) => `
+    <div class="item"><div class="defeito">
+      <div class="linha"><select class="esp" data-bind="ocTipo" data-i="${o.id}">${TIPOS_OCORRENCIA.map((t) => `<option ${o.tipo === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <button class="peq perigo" data-act="rmoc" data-i="${o.id}">×</button></div>
+      <textarea data-bind="ocTexto" data-i="${o.id}" style="margin-top:6px" placeholder="O que aconteceu">${esc(o.texto)}</textarea>
+      ${blocoFotos({ t: 'oc', i: o.id }, o.fotos)}
+    </div></div>`);
+  $('#tela').innerHTML = `
+    <div class="card"><div class="linha"><div class="esp"><div class="neg">Diário de obra</div>
+      <div class="mudo">por ${esc(vis.por)}${vis.papel ? ' · ' + esc(PAPEIS[vis.papel] || '') : ''}</div></div>
+      <span class="pill ${vis.fechado ? 'ok' : 'lar'}">${vis.fechado ? 'fechado' : 'em aberto'}</span></div>
+      <label>Data</label>
+      <input type="date" data-bind="data" value="${esc(vis.data)}" style="width:100%;font:inherit;padding:10px;border:1.5px solid #d1d5db;border-radius:10px"></div>
+    <h2 class="sec">Clima</h2>
+    <div class="card"><label style="margin-top:0">Manhã</label>${clima('manha')}<label>Tarde</label>${clima('tarde')}</div>
+    <h2 class="sec">Efetivo (pessoas na obra)</h2>
+    <div class="card"><div class="linha">
+      <div class="esp"><label style="margin-top:0">Próprios</label><input type="text" inputmode="numeric" data-bind="efProprio" value="${esc(vis.efetivo.proprio)}" placeholder="0"></div>
+      <div class="esp"><label style="margin-top:0">Terceirizados</label><input type="text" inputmode="numeric" data-bind="efTerceiros" value="${esc(vis.efetivo.terceiros)}" placeholder="0"></div></div></div>
+    <h2 class="sec">Serviços executados</h2>
+    ${servs.length ? `<div class="card">${servs.join('')}</div>` : ''}
+    <button class="sec" style="width:100%;margin-bottom:6px" data-act="novoserv">+ Adicionar serviço</button>
+    <h2 class="sec">Ocorrências</h2>
+    ${ocs.length ? `<div class="card">${ocs.join('')}</div>` : ''}
+    <button class="sec" style="width:100%;margin-bottom:6px" data-act="novooc">+ Registrar ocorrência</button>
+    <h2 class="sec">Fechamento</h2>
+    <div class="card"><label style="margin-top:0">Observações do dia</label>
+      <textarea data-bind="obsGerais" placeholder="Visitas, entregas de material, decisões…">${esc(vis.obsGerais)}</textarea>
+      ${blocoFotos({ t: 'geral' }, vis.fotosGerais)}</div>
+    <button class="pri" data-act="fechardia">${vis.fechado ? 'Reabrir dia' : 'Fechar o dia'}</button>
+    <div class="acoes"><button class="peq perigo" data-act="excluir">Excluir</button></div>`;
+}
+
 async function telaLista() {
   topo({ titulo: 'Vistorias' });
-  const todas = (await bdTodas()).sort((a, b) => b.atualizadoEm.localeCompare(a.atualizadoEm));
+  const todas = (await bdTodas()).filter((v) => v.tipo !== 'diario').sort((a, b) => b.atualizadoEm.localeCompare(a.atualizadoEm));
   const cards = todas.map((v) => {
     const sujo = v._sync && v._sync.sujo;
     return `<div class="card tap" data-act="abrir" data-id="${v.id}">
@@ -497,6 +653,7 @@ async function telaLista() {
       </div></div>`;
   });
   $('#tela').innerHTML = `
+    ${abas('lista')}
     ${await alertaEnvio()}
     <button class="pri" data-act="nova">+ Nova vistoria</button>
     <h2 class="sec">Neste aparelho</h2>
@@ -566,6 +723,7 @@ function ligarAssinaturas() {
 }
 
 function telaVistoria() {
+  if (vis.tipo === 'diario') return telaDiario();
   if (vis.tipo === 'revistoria') return telaRevistoria();
   const c = contar(vis);
   topo({ titulo: `${vis.empreendimento} · ${vis.unidade}`, voltar: true });
@@ -684,6 +842,8 @@ async function telaRelatorio() {
 function desenhar() {
   const t = tela.nome;
   if (t === 'lista') telaLista();
+  else if (t === 'obra') telaObra();
+  else if (t === 'equipeobra') telaEquipeObra();
   else if (t === 'nova') telaNova();
   else if (t === 'vistoria') telaVistoria();
   else if (t === 'amb') telaAmbiente();
@@ -702,7 +862,8 @@ function ir(nome, extra = {}) {
 function voltar() {
   if (tela.nome === 'amb') { tela = { nome: 'vistoria' }; }
   else if (tela.nome === 'relatorio') { tela = tela.de || { nome: 'lista' }; }
-  else if (tela.nome === 'vistoria') { salvarAgora(); vis = null; tela = { nome: 'lista' }; }
+  else if (tela.nome === 'vistoria') { const dia = vis && vis.tipo === 'diario'; salvarAgora(); vis = null; tela = { nome: dia ? 'obra' : 'lista' }; }
+  else if (tela.nome === 'equipeobra') tela = { nome: 'obra' };
   else tela = { nome: 'lista' };
   desenhar();
   window.scrollTo(0, 0);
@@ -732,6 +893,40 @@ document.addEventListener('click', async (e) => {
   if (act === 'voltar') return history.back();
   if (act === 'nova') return ir('nova');
   if (act === 'equipe') return ir('equipe');
+  if (act === 'equipeobra') return ir('equipeobra');
+  if (act === 'perfil') return pedirPerfil(false);
+  if (act === 'aba') {
+    tela = { nome: d.aba };
+    history.replaceState({ nome: d.aba }, '');
+    return desenhar();
+  }
+  if (act === 'criardiario') {
+    const emp = $('#fObra').value.trim();
+    const data = $('#fData').value || hojeISO();
+    if (!emp) return alert('Escolha a obra.');
+    if (!perfil) return pedirPerfil(true);
+    localStorage.setItem('ultimaObra', emp);
+    // Já existe diário desta obra neste dia neste aparelho? Abre em vez de duplicar.
+    const ja = (await bdTodas()).find((v) => v.tipo === 'diario' && v.empreendimento === emp && v.data === data);
+    vis = ja || novoDiario({ empreendimento: emp, data, por: perfil.nome, papel: perfil.papel });
+    if (!ja) { await bdPut(vis); agendarSync(); }
+    return ir('vistoria');
+  }
+  if (act === 'remotodiario') {
+    try {
+      let local = await bdGet(d.id);
+      if (!local) {
+        const { doc } = await Api.obter(d.id);
+        local = { ...doc, _sync: { sujo: false } };
+        await bdPut(local);
+      }
+      vis = local;
+      return ir('vistoria');
+    } catch (err) {
+      if (err.codigo) return pedirCodigo();
+      return alert('Não consegui buscar esse diário. Precisa de sinal.');
+    }
+  }
   if (act === 'imprimir') { const f = $('#frRel'); if (f) f.contentWindow.print(); return; }
   if (act === 'relatorio') {
     e.stopPropagation();
@@ -765,6 +960,36 @@ document.addEventListener('click', async (e) => {
   }
   if (!vis) return;
   if (act === 'revistoria') { await salvarAgora(); return abrirRevistoria(vis); }
+  if (act === 'clima') {
+    vis.clima[d.p] = vis.clima[d.p] === d.k ? null : d.k;
+    tocar();
+    return desenhar();
+  }
+  if (act === 'novoserv') {
+    vis.servicos.push({ id: uid(), local: '', texto: '', fotos: [] });
+    tocar();
+    return desenhar();
+  }
+  if (act === 'novooc') {
+    vis.ocorrencias.push({ id: uid(), tipo: TIPOS_OCORRENCIA[0], texto: '', fotos: [] });
+    tocar();
+    return desenhar();
+  }
+  if (act === 'rmserv' || act === 'rmoc') {
+    const campo = act === 'rmserv' ? 'servicos' : 'ocorrencias';
+    const it = vis[campo].find((x) => x.id === d.i);
+    if ((it.texto || (it.fotos || []).length) && !confirm('Remover este item e as fotos dele?')) return;
+    for (const f of it.fotos || []) await fotoDel(f);
+    vis[campo] = vis[campo].filter((x) => x.id !== d.i);
+    tocar();
+    return desenhar();
+  }
+  if (act === 'fechardia') {
+    vis.fechado = !vis.fechado;
+    tocar();
+    await salvarAgora();
+    return desenhar();
+  }
   if (act === 'amb') return ir('amb', { a: d.a });
   if (act === 'estado') {
     const a = vis.ambientes.find((x) => x.id === tela.a);
@@ -840,10 +1065,12 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'excluir') {
     const enviada = vis._sync && !vis._sync.sujo;
-    if (!confirm(enviada ? 'Excluir esta vistoria deste aparelho? (A cópia no Drive permanece.)' : 'ATENÇÃO: esta vistoria ainda NÃO foi enviada ao Drive. Excluir apaga de vez. Continuar?')) return;
+    const dia = vis.tipo === 'diario';
+    const que = dia ? 'este diário' : 'esta vistoria';
+    if (!confirm(enviada ? `Excluir ${que} deste aparelho? (A cópia no Drive permanece.)` : `ATENÇÃO: ${que} ainda NÃO foi enviado(a) ao Drive. Excluir apaga de vez. Continuar?`)) return;
     await bdDel(vis.id);
     vis = null;
-    tela = { nome: 'lista' };
+    tela = { nome: dia ? 'obra' : 'lista' };
     return desenhar();
   }
 });
@@ -857,6 +1084,13 @@ document.addEventListener('input', (e) => {
   else if (b === 'item') vis.ambientes.find((x) => x.id === tela.a).itens.find((x) => x.id === t.dataset.i).obs = t.value;
   else if (b === 'rev') vis.revisao.find((x) => x.id === t.dataset.i).obs = t.value;
   else if (b === 'novo') vis.novos.find((x) => x.id === t.dataset.i).obs = t.value;
+  else if (b === 'data') vis.data = t.value;
+  else if (b === 'efProprio') vis.efetivo.proprio = t.value;
+  else if (b === 'efTerceiros') vis.efetivo.terceiros = t.value;
+  else if (b === 'srvLocal') vis.servicos.find((x) => x.id === t.dataset.i).local = t.value;
+  else if (b === 'srvTexto') vis.servicos.find((x) => x.id === t.dataset.i).texto = t.value;
+  else if (b === 'ocTipo') vis.ocorrencias.find((x) => x.id === t.dataset.i).tipo = t.value;
+  else if (b === 'ocTexto') vis.ocorrencias.find((x) => x.id === t.dataset.i).texto = t.value;
   tocar();
 });
 
@@ -868,7 +1102,7 @@ for (const sel of ['#inCamera', '#inGaleria']) {
   });
 }
 
-window.addEventListener('popstate', () => { if (tela.nome !== 'lista') voltar(); });
+window.addEventListener('popstate', () => { if (tela.nome !== 'lista' && tela.nome !== 'obra') voltar(); });
 window.addEventListener('online', sincronizar);
 window.addEventListener('offline', atualizarTopoSync);
 document.addEventListener('visibilitychange', () => {
@@ -885,8 +1119,10 @@ setInterval(sincronizar, 60000);
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
-  history.replaceState({ nome: 'lista' }, '');
+  if (perfil && perfil.papel === 'mestre') tela = { nome: 'obra' };
+  history.replaceState({ nome: tela.nome }, '');
   desenhar();
+  if (!perfil) pedirPerfil(true);
   if (!Api.temToken()) precisaCodigo = true;
   sincronizar();
 })();

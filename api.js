@@ -35,6 +35,7 @@ const Api = (() => {
     foto: (vid, fid, b64) => chamar('foto', { vid, fid, b64 }),
     pdf: (vid, html) => chamar('pdf', { vid, html }), // -> { url }
     listar: () => chamar('listar'), // -> { vistorias: [...] }
+    listarObra: () => chamar('listarObra'), // -> { diarios: [...] }
     obter: (id) => chamar('obter', { id }), // -> { doc }
     fotoGet: (vid, fid) => chamar('fotoGet', { vid, fid }), // -> { b64 }
   };
