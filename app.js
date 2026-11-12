@@ -39,7 +39,7 @@ let perfil = (() => {
 // Pendência de obra: algo a resolver, com responsável e prazo. Pode nascer de um defeito de vistoria
 // (guarda a origem e aponta para as fotos dela, sem copiar).
 const STATUS_PEND = { aberta: 'Aberta', andamento: 'Em andamento', resolvida: 'Resolvida' };
-const EM_OBRA = ['diario', 'pendencia']; // tipos que vivem na aba Obra, não na lista de vistorias
+const EM_OBRA = ['diario', 'pendencia', 'avanco']; // tipos que vivem na aba Obra, não na lista de vistorias
 const atrasada = (p) => p.tipo === 'pendencia' && p.status !== 'resolvida' && p.prazo && p.prazo < hojeISO();
 function novaPendencia({ empreendimento, unidade, titulo, descricao, por, papel, origem, fotosOrigem }) {
   return {
@@ -617,6 +617,7 @@ async function telaObra() {
       <label>Data</label>
       <input type="date" id="fData" value="${hojeISO()}" style="width:100%;font:inherit;padding:10px;border:1.5px solid #d1d5db;border-radius:10px">
       <div class="acoes"><button class="pri" style="flex:1" data-act="criardiario">Diário do dia</button><button class="sec" style="flex:1" data-act="criarpend">+ Pendência</button></div>
+      <div class="acoes"><button class="sec" style="flex:1" data-act="avanco">Avanço por etapa</button></div>
     </div>
     <h2 class="sec">Pendências${abertas ? ` · ${abertas} em aberto` : ''}</h2>
     ${pends.length ? pends.map((v) => cardPend(v, 'abrir')).join('') : '<div class="vazio">Nenhuma pendência neste aparelho.</div>'}
@@ -685,6 +686,142 @@ function telaDiario() {
       ${blocoFotos({ t: 'geral' }, vis.fotosGerais)}</div>
     <button class="pri" data-act="fechardia">${vis.fechado ? 'Reabrir dia' : 'Fechar o dia'}</button>
     <div class="acoes"><button class="peq perigo" data-act="excluir">Excluir</button></div>`;
+}
+
+// ---------- obra: avanço por etapa ----------
+// Cada visita gera uma "medição" (tipo 'avanco') com lançamentos { etapa, escopo, pct, em }. O avanço atual
+// de cada etapa/unidade é o lançamento mais recente entre TODAS as medições (as daqui + as da equipe),
+// então ninguém sobrescreve o trabalho do outro e o histórico fica guardado.
+const ESC_GERAL = 'Geral da obra';
+const ETAPAS = ['Fundação', 'Estrutura', 'Alvenaria', 'Instalações (elétrica e hidráulica)', 'Revestimentos e contrapiso', 'Esquadrias', 'Pintura', 'Acabamentos e louças', 'Áreas comuns e externas', 'Limpeza e entrega'];
+const PASSOS = [0, 25, 50, 75, 100];
+
+function avancoRemoto() {
+  try { return JSON.parse(localStorage.getItem('avancoRemoto')) || []; } catch { return []; }
+}
+async function atualizarAvancoRemoto() {
+  if (!navigator.onLine || !Api.temToken()) return false;
+  try {
+    const r = await Api.listarObra();
+    localStorage.setItem('avancoRemoto', JSON.stringify(r.avancos || []));
+    return true;
+  } catch { return false; }
+}
+async function estadoAvanco(emp) {
+  const locais = (await bdTodas()).filter((v) => v.tipo === 'avanco' && v.empreendimento === emp);
+  const ids = new Set(locais.map((v) => v.id));
+  const ev = [];
+  for (const d of locais) for (const l of d.lancamentos) ev.push({ etapa: l.etapa, escopo: l.escopo, pct: l.pct, em: l.em, por: d.por });
+  for (const r of avancoRemoto()) {
+    if (r.empreendimento !== emp || ids.has(r.id)) continue;
+    for (const [etapa, escopo, pct, em] of r.lanc || []) ev.push({ etapa, escopo, pct, em, por: r.por });
+  }
+  const ultimo = new Map();
+  for (const e of ev) {
+    const k = `${e.etapa}|${e.escopo}`;
+    const a = ultimo.get(k);
+    if (!a || e.em > a.em) ultimo.set(k, e);
+  }
+  const unis = new Set(unidades[emp] || []);
+  for (const e of ultimo.values()) if (e.escopo !== ESC_GERAL) unis.add(e.escopo);
+  const etapas = [...ETAPAS];
+  for (const e of ultimo.values()) if (!etapas.includes(e.etapa)) etapas.push(e.etapa);
+  const listaUnis = [...unis];
+  // Etapa com lançamentos por unidade: média sobre TODAS as unidades (sem lançamento = 0). Senão, o geral da obra.
+  const pctEtapa = (et) => {
+    const dasUnis = listaUnis.map((u) => ultimo.get(`${et}|${u}`));
+    if (dasUnis.some(Boolean)) {
+      const soma = dasUnis.reduce((s, x) => s + (x ? x.pct : 0), 0);
+      const em = dasUnis.filter(Boolean).reduce((m, x) => (x.em > m ? x.em : m), '');
+      return { pct: Math.round((soma / listaUnis.length) * 10) / 10, base: 'unidades', em, por: (dasUnis.filter(Boolean).find((x) => x.em === em) || {}).por };
+    }
+    const g = ultimo.get(`${et}|${ESC_GERAL}`);
+    return g ? { pct: g.pct, base: 'geral', em: g.em, por: g.por } : { pct: 0, base: null, em: '', por: '' };
+  };
+  return { ultimo, unis: listaUnis, etapas, pctEtapa };
+}
+
+async function lancar(emp, etapa, escopo, pct, obs) {
+  if (!perfil) return pedirPerfil(true);
+  const hoje = hojeISO();
+  let m = (await bdTodas()).find((v) => v.tipo === 'avanco' && v.empreendimento === emp && v.data === hoje && v.por === perfil.nome);
+  if (!m) m = { id: uid(), tipo: 'avanco', empreendimento: emp, unidade: '', data: hoje, por: perfil.nome, papel: perfil.papel, criadoEm: agora(), atualizadoEm: agora(), concluida: false, lancamentos: [], _sync: { sujo: true } };
+  const l = m.lancamentos.find((x) => x.etapa === etapa && x.escopo === escopo);
+  if (l) { l.pct = pct; l.em = agora(); if (obs) l.obs = obs; } else m.lancamentos.push({ id: uid(), etapa, escopo, pct, obs: obs || '', em: agora() });
+  m.atualizadoEm = agora();
+  m._sync = { ...(m._sync || {}), sujo: true };
+  await bdPut(m);
+  agendarSync();
+}
+
+const fmtP = (p) => String(p).replace('.', ',');
+const barra = (p) => `<div class="barra"><i style="width:${p}%;background:${p >= 100 ? 'var(--ok)' : 'var(--laranja)'}"></i></div>`;
+const quando = (e) => (e.em ? `atualizado em ${new Date(e.em).toLocaleDateString('pt-BR')}${e.por ? ' por ' + esc(e.por) : ''}` : 'sem lançamento');
+
+async function telaAvanco() {
+  const emp = tela.emp;
+  topo({ titulo: `Avanço · ${emp}`, voltar: true });
+  const est = await estadoAvanco(emp);
+  const linhas = est.etapas.map((et) => ({ et, ...est.pctEtapa(et) }));
+  const geral = Math.round((linhas.reduce((s, x) => s + x.pct, 0) / linhas.length) * 10) / 10;
+  const prontas = linhas.filter((x) => x.pct >= 100).length;
+  $('#tela').innerHTML = `
+    <div class="card"><div class="linha"><div class="esp"><div class="mudo">Avanço geral da obra</div><div class="neg" style="font-size:28px">${fmtP(geral)}%</div></div>
+      <span class="pill ${prontas === linhas.length ? 'ok' : 'lar'}">${prontas}/${linhas.length} etapas concluídas</span></div>${barra(geral)}
+      <p class="mudo" style="margin:8px 0 0">Média simples das etapas. Em etapas lançadas por unidade, vale a média de todas as unidades.</p></div>
+    <h2 class="sec">Etapas</h2>
+    ${linhas.map((x) => `<div class="card tap" data-act="abriretapa" data-e="${esc(x.et)}">
+      <div class="linha"><div class="esp neg">${esc(x.et)}</div><span class="neg">${fmtP(x.pct)}%</span></div>${barra(x.pct)}
+      <div class="mudo" style="margin-top:6px">${x.base === 'unidades' ? 'por unidade · ' : ''}${quando(x)}</div></div>`).join('')}
+    <button class="sec" style="width:100%" data-act="novaetapa">+ Nova etapa</button>`;
+  if (!tela.buscou) {
+    tela.buscou = true;
+    atualizarAvancoRemoto().then((ok) => { if (ok && tela.nome === 'avanco') desenhar(); });
+  }
+}
+
+async function telaEtapa() {
+  const { emp, etapa } = tela;
+  topo({ titulo: etapa, voltar: true });
+  const est = await estadoAvanco(emp);
+  const r = est.pctEtapa(etapa);
+  const g = est.ultimo.get(`${etapa}|${ESC_GERAL}`);
+  const filtro = tela.filtro || 'todas';
+  const classe = (p) => (p >= 100 ? 'p100' : p > 0 ? 'pm' : '');
+  const visiveis = est.unis.filter((u) => {
+    const p = (est.ultimo.get(`${etapa}|${u}`) || { pct: 0 }).pct;
+    return filtro === 'todas' || (filtro === 'zero' && p === 0) || (filtro === 'meio' && p > 0 && p < 100) || (filtro === 'cem' && p >= 100);
+  });
+  $('#tela').innerHTML = `
+    <div class="card"><div class="linha"><div class="esp neg">${esc(etapa)}</div><span class="neg">${fmtP(r.pct)}%</span></div>${barra(r.pct)}
+      <div class="mudo" style="margin-top:6px">${quando(r)}</div></div>
+    <h2 class="sec">Obra como um todo</h2>
+    <div class="card"><div class="seg">${PASSOS.map((p) => `<button class="s-t ${g && g.pct === p ? 'on' : ''}" data-act="setgeral" data-p="${p}">${p}%</button>`).join('')}</div>
+      <div class="acoes"><button class="peq" data-act="setgeral" data-p="outro">Outro valor</button></div>
+      ${r.base === 'unidades' && g ? '<p class="mudo" style="margin:8px 0 0">Enquanto houver lançamento por unidade, o avanço da etapa usa a média das unidades.</p>' : ''}</div>
+    <h2 class="sec">Por unidade${est.unis.length ? ` · ${est.unis.length}` : ''}</h2>
+    ${est.unis.length ? `<div class="seg" style="margin-bottom:8px">${[['todas', 'Todas'], ['zero', 'Não iniciadas'], ['meio', 'Em andamento'], ['cem', 'Prontas']].map(([k, n]) => `<button style="font-size:12px" class="s-t ${filtro === k ? 'on' : ''}" data-act="filtro" data-k="${k}">${n}</button>`).join('')}</div>
+      <div class="mapa">${visiveis.map((u) => { const l = est.ultimo.get(`${etapa}|${u}`); const p = l ? l.pct : 0; return `<div class="chip ${classe(p)}" data-act="chip" data-u="${esc(u)}"><span>${esc(u)}</span><b>${p}%</b></div>`; }).join('') || '<div class="vazio" style="grid-column:1/-1">Nenhuma unidade neste filtro.</div>'}</div>`
+      : '<div class="vazio">Esta obra não tem lista de unidades no app.<br>Use o avanço geral acima.</div>'}`;
+}
+
+function modalPct(titulo, atual, aoEscolher) {
+  $('#modalCorpo').innerHTML = `
+    <h3 style="margin:0 0 6px">${esc(titulo)}</h3>
+    <p class="mudo" style="margin:0 0 8px">Quanto está pronto? (agora: ${atual}%)</p>
+    <div class="seg">${PASSOS.map((p) => `<button class="s-t ${p === atual ? 'on' : ''}" data-p="${p}">${p}%</button>`).join('')}</div>
+    <label>Observação (opcional)</label><input type="text" id="inObsPct" autocomplete="off">
+    <div class="acoes"><button class="peq" id="btOutro">Outro valor</button><button class="peq" id="btCancela">Cancelar</button></div>`;
+  $('#modal').classList.add('on');
+  const fim = (p) => { const obs = $('#inObsPct').value.trim(); $('#modal').classList.remove('on'); aoEscolher(p, obs); };
+  $('#modalCorpo .seg').onclick = (e) => { const b = e.target.closest('button[data-p]'); if (b) fim(Number(b.dataset.p)); };
+  $('#btOutro').onclick = () => {
+    const v = prompt('Percentual (0 a 100):', String(atual));
+    const n = Number(String(v || '').replace(',', '.').replace('%', ''));
+    if (v === null || v.trim() === '' || !Number.isFinite(n) || n < 0 || n > 100) return;
+    fim(Math.round(n));
+  };
+  $('#btCancela').onclick = () => $('#modal').classList.remove('on');
 }
 
 function telaPendencia() {
@@ -929,6 +1066,8 @@ function desenhar() {
   if (t === 'lista') telaLista();
   else if (t === 'obra') telaObra();
   else if (t === 'equipeobra') telaEquipeObra();
+  else if (t === 'avanco') telaAvanco();
+  else if (t === 'etapa') telaEtapa();
   else if (t === 'nova') telaNova();
   else if (t === 'vistoria') telaVistoria();
   else if (t === 'amb') telaAmbiente();
@@ -949,6 +1088,8 @@ function voltar() {
   else if (tela.nome === 'relatorio') { tela = tela.de || { nome: 'lista' }; }
   else if (tela.nome === 'vistoria') { const dia = vis && EM_OBRA.includes(vis.tipo); salvarAgora(); vis = null; tela = { nome: dia ? 'obra' : 'lista' }; }
   else if (tela.nome === 'equipeobra') tela = { nome: 'obra' };
+  else if (tela.nome === 'etapa') tela = { nome: 'avanco', emp: tela.emp, buscou: true };
+  else if (tela.nome === 'avanco') tela = { nome: 'obra' };
   else tela = { nome: 'lista' };
   desenhar();
   window.scrollTo(0, 0);
@@ -996,6 +1137,33 @@ document.addEventListener('click', async (e) => {
     vis = ja || novoDiario({ empreendimento: emp, data, por: perfil.nome, papel: perfil.papel });
     if (!ja) { await bdPut(vis); agendarSync(); }
     return ir('vistoria');
+  }
+  if (act === 'avanco') {
+    const emp = $('#fObra').value.trim();
+    if (!emp) return alert('Escolha a obra.');
+    localStorage.setItem('ultimaObra', emp);
+    return ir('avanco', { emp });
+  }
+  if (act === 'abriretapa') return ir('etapa', { emp: tela.emp, etapa: d.e });
+  if (act === 'filtro') { tela.filtro = d.k; return desenhar(); }
+  if (act === 'novaetapa') {
+    const nome = prompt('Nome da nova etapa:');
+    if (!nome || !nome.trim()) return;
+    await lancar(tela.emp, nome.trim(), ESC_GERAL, 0, '');
+    return desenhar();
+  }
+  if (act === 'setgeral') {
+    const est = await estadoAvanco(tela.emp);
+    const g = est.ultimo.get(`${tela.etapa}|${ESC_GERAL}`);
+    const atual = g ? g.pct : 0;
+    if (d.p === 'outro') return modalPct('Obra como um todo', atual, (p, obs) => lancar(tela.emp, tela.etapa, ESC_GERAL, p, obs).then(desenhar));
+    await lancar(tela.emp, tela.etapa, ESC_GERAL, Number(d.p), '');
+    return desenhar();
+  }
+  if (act === 'chip') {
+    const est = await estadoAvanco(tela.emp);
+    const l = est.ultimo.get(`${tela.etapa}|${d.u}`);
+    return modalPct(`${tela.etapa} · ${d.u}`, l ? l.pct : 0, (p, obs) => lancar(tela.emp, tela.etapa, d.u, p, obs).then(desenhar));
   }
   if (act === 'criarpend') {
     const emp = $('#fObra').value.trim();
