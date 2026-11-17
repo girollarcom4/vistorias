@@ -552,9 +552,11 @@ function resumoItens(v) {
 }
 
 function abas(atual) {
-  return `<div class="seg" style="margin-bottom:6px">
+  // Quem só vistoria (perfil Vistoriador) não vê a aba Obra: menos coisa na tela em campo.
+  const soVistoria = perfil && perfil.papel === 'vistoriador';
+  return `${soVistoria ? '' : `<div class="seg" style="margin-bottom:6px">
       <button class="s-t ${atual === 'lista' ? 'on' : ''}" data-act="aba" data-aba="lista">Vistorias</button>
-      <button class="s-t ${atual === 'obra' ? 'on' : ''}" data-act="aba" data-aba="obra">Obra</button></div>
+      <button class="s-t ${atual === 'obra' ? 'on' : ''}" data-act="aba" data-aba="obra">Obra</button></div>`}
     <div class="mudo" style="margin:0 2px 10px">👤 ${perfil ? `${esc(perfil.nome)} · ${PAPEIS[perfil.papel]}` : 'sem identificação'} <button class="peq" data-act="perfil">alterar</button></div>`;
 }
 
@@ -580,6 +582,7 @@ function pedirPerfil(obrigatorio) {
     localStorage.setItem('vistoriadoPor', nome);
     $('#modal').classList.remove('on');
     if (primeira && perfil.papel === 'mestre' && tela.nome === 'lista') tela = { nome: 'obra' };
+    if (perfil.papel === 'vistoriador' && tela.nome === 'obra') tela = { nome: 'lista' };
     desenhar();
   };
 }
