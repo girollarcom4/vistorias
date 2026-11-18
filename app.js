@@ -339,7 +339,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 18/11 · relatório maior';
+const VERSAO_APP = 'versão 18/11 · relatório maior + aviso de atualização';
 
 function agendarSync() {
   clearTimeout(timerSync);
@@ -1448,6 +1448,24 @@ document.addEventListener('visibilitychange', () => {
   else sincronizar();
 });
 window.addEventListener('pagehide', salvarAgora);
+
+// Celular com o app aberto não pega a versão nova sozinho (principalmente no iPhone). Compara com a do servidor e avisa.
+async function verificarVersao() {
+  try {
+    const t = await (await fetch('app.js?v=' + Date.now(), { cache: 'no-store' })).text();
+    const m = t.match(/const VERSAO_APP = '([^']+)'/);
+    if (!m || m[1] === VERSAO_APP || document.getElementById('avisoVersao')) return;
+    const d = document.createElement('div');
+    d.id = 'avisoVersao';
+    d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:60;background:#1f2f4a;color:#fff;border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+    d.innerHTML = '<span style="flex:1;font-size:14px">Há uma versão nova do app.</span><button style="background:#e8731a;color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;font-weight:700">Atualizar agora</button>';
+    d.querySelector('button').onclick = async () => { await salvarAgora(); location.reload(); }; // o que está a enviar fica guardado no aparelho
+    document.body.appendChild(d);
+  } catch { /* sem sinal: tenta de novo mais tarde */ }
+}
+setTimeout(verificarVersao, 4000);
+setInterval(verificarVersao, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarVersao(); });
 setInterval(sincronizar, 60000);
 
 // ---------- partida ----------

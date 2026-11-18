@@ -22,7 +22,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET' || url.origin !== location.origin) return;
   if (url.pathname.includes('/api/') || url.pathname.includes('/r/')) return;
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' }) // sempre pergunta ao servidor se mudou (o cache do navegador chega a segurar 10 min)
       .then((r) => {
         if (r.ok) {
           const copia = r.clone();
