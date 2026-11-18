@@ -73,13 +73,14 @@
         ${linhas ? `<table class="def"><thead><tr><th style="width:50%">Antes</th><th>Depois</th></tr></thead><tbody>${linhas}</tbody></table>` : '<p class="mudo">Nenhum defeito em aberto.</p>'}
         ${novos ? `<h2>Defeitos novos encontrados</h2><table class="def"><thead><tr><th style="width:35%">Item</th><th>Descrição</th></tr></thead><tbody>${novos}</tbody></table>` : ''}`;
     } else {
+      const vazios = [];
       corpo = (v.ambientes || []).map((a) => {
         const defs = (a.itens || []).filter((i) => i.estado === 'defeito');
         const oks = (a.itens || []).filter((i) => i.estado === 'ok').map((i) => esc(i.nome));
         const nas = (a.itens || []).filter((i) => i.estado === 'na').length;
         const pend = (a.itens || []).filter((i) => !i.estado).length;
         const vazio = !defs.length && !oks.length && !(a.obs || '').trim() && !(a.fotos || []).length;
-        if (vazio && !pend) return '';
+        if (vazio) { vazios.push(a.nome); return ''; } // ambiente sem nada marcado não vira linha repetida no relatório
         return `<div class="amb"><h3>${esc(a.nome)}</h3>
           ${defs.length ? `<table class="def"><thead><tr><th style="width:30%">Defeito apontado</th><th>Observação</th></tr></thead><tbody>${defs
             .map((i) => `<tr><td><b>${esc(i.nome)}</b></td><td>${esc(i.obs || '—')}${grade(minhas(i.fotos))}</td></tr>`).join('')}</tbody></table>` : ''}
@@ -89,12 +90,12 @@
           ${(a.obs || '').trim() ? `<p><b>Observações:</b> ${esc(a.obs)}</p>` : ''}
           ${grade(minhas(a.fotos))}</div>`;
       }).join('');
-      corpo = `<h2>Ambientes</h2>${corpo || '<p class="mudo">Nenhum item preenchido.</p>'}`;
+      corpo = `<h2>Ambientes</h2>${corpo || '<p class="mudo">Nenhum item preenchido.</p>'}${vazios.length ? `<p class="mudo">Sem itens marcados: ${vazios.map(esc).join(', ')}.</p>` : ''}`;
     }
 
     const resumo = v.tipo === 'revistoria'
       ? `<td class="o"><b>${c.ok}</b>corrigidos</td><td class="d"><b>${c.tot - c.ok}</b>ainda abertos</td><td class="d"><b>${c.novos}</b>defeitos novos</td>`
-      : `<td class="o"><b>${c.ok}</b>conformes</td><td class="d"><b>${c.d}</b>defeitos</td><td><b>${c.na}</b>não se aplicam</td>`;
+      : `<td class="o"><b>${c.ok}</b>conformes</td><td class="d"><b>${c.d}</b>defeitos</td><td><b>${c.na}</b>não se aplicam</td>${c.tot - c.feitos > 0 ? `<td><b>${c.tot - c.feitos}</b>não vistoriados</td>` : ''}`;
     const situacao = !v.concluida ? 'Em andamento' : c.abertos ? `Concluída · ${c.abertos} defeito(s) em aberto` : 'Concluída · sem defeitos em aberto — unidade liberada';
     const assin = (rotulo, nome, img) => `<td class="assin">${img ? `<img src="${esc(img)}">` : '<div class="vaz"></div>'}<div class="nome">${esc(rotulo)}${nome ? ': ' + esc(nome) : ''}</div></td>`;
     const logo = opts.logo === undefined ? 'girollar-logo.svg' : opts.logo;
@@ -112,11 +113,11 @@
   table.resumo{width:100%;border-collapse:separate;border-spacing:8px 0;margin:6px 0 12px} .resumo td{border:1px solid #e5e7eb;padding:6px;text-align:center}
   .resumo b{display:block;font-size:19px} .resumo .d b{color:#b91c1c} .resumo .o b{color:#15803d}
   h2{font-size:14px;color:#1f2f4a;margin:14px 0 6px;border-bottom:1px solid #e5e7eb;padding-bottom:3px}
-  .amb{margin-bottom:10px;page-break-inside:avoid} .amb h3{margin:8px 0 4px;font-size:13px;background:#f3f4f6;padding:4px 8px;border-left:4px solid #1f2f4a}
+  .amb{margin-bottom:10px} table.def tr{page-break-inside:avoid} .amb h3{page-break-after:avoid;margin:8px 0 4px;font-size:13px;background:#f3f4f6;padding:4px 8px;border-left:4px solid #1f2f4a}
   table.def{width:100%;border-collapse:collapse;margin:4px 0} .def th,.def td{border:1px solid #e5e7eb;padding:5px 7px;vertical-align:top;text-align:left}
   .def th{background:#fef2f2;font-size:11px} tr.corr .est{color:#15803d} tr.aberto .est{color:#b91c1c}
   .ok{color:#166534;margin:4px 0} .mudo{color:#6b7280;margin:2px 0;font-size:11px}
-  .fotos{margin:5px 0 0} .fotos img{height:120px;margin:0 5px 5px 0;border:1px solid #d1d5db;vertical-align:top}
+  .fotos{margin:6px 0 0} .fotos img{height:240px;margin:0 6px 6px 0;border:1px solid #d1d5db;vertical-align:top}
   table.assinaturas{width:100%;margin-top:24px;page-break-inside:avoid} .assin{text-align:center;padding:0 14px;vertical-align:bottom}
   .assin img{max-height:64px;max-width:100%} .assin .vaz{height:56px} .assin .nome{border-top:1px solid #111;padding-top:3px;font-size:11px}
   .rodape{margin-top:16px;color:#6b7280;font-size:10px;text-align:center}
@@ -128,7 +129,7 @@ ${opts.barra ? `<div class="barra">${opts.barra}</div>` : ''}
   <table class="cab"><tr><td>${marca}</td><td><h1>Relatório de ${v.tipo === 'revistoria' ? 'Revistoria' : 'Vistoria'}</h1><small>${esc(TIPO[v.tipo] || 'Vistoria')}</small></td></tr></table>
   <table class="dados">
     <tr><td><span>Empreendimento</span>${esc(v.empreendimento)}</td><td><span>Unidade</span>${esc(v.unidade)}</td></tr>
-    <tr><td><span>Vistoriado por</span>${esc(v.por)}</td><td><span>Data</span>${esc(dataBR(v.criadoEm))}</td></tr>
+    <tr><td><span>Vistoriado por</span>${esc(v.por)}</td><td><span>Data</span>${esc(dataBR(v.criadoEm))}${v.concluida && v.concluidaEm ? `<br><span style="display:inline">concluída em ${esc(dataBR(v.concluidaEm))}</span>` : ''}</td></tr>
     <tr>${v.tipo === 'cliente' ? `<td><span>Cliente</span>${esc(v.cliente || '—')}</td>` : '<td></td>'}<td><span>Situação</span>${esc(situacao)}</td></tr>
   </table>
   <table class="resumo"><tr>${resumo}</tr></table>

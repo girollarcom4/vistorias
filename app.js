@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * Vistorias Girollar - app do celular.
  *
@@ -236,7 +236,7 @@ async function comprimir(file) {
   if (bmp.close) bmp.close();
   // Carimbo com unidade e data/hora: a foto vira prova do estado naquele momento.
   const txt = `${vis.tipo === 'diario' ? vis.empreendimento : vis.tipo === 'pendencia' ? [vis.empreendimento, vis.unidade].filter(Boolean).join(' ') : vis.unidade} ·${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
-  const fs = Math.max(14, Math.round(Math.max(w, h) * 0.022));
+  const fs = Math.max(16, Math.round(Math.max(w, h) * 0.03)); // legível também quando a foto entra reduzida no relatório
   g.font = `600 ${fs}px system-ui, sans-serif`;
   const tw = g.measureText(txt).width;
   g.fillStyle = 'rgba(0,0,0,.55)';
@@ -339,7 +339,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 18/11 · envio rápido';
+const VERSAO_APP = 'versão 18/11 · relatório maior';
 
 function agendarSync() {
   clearTimeout(timerSync);
@@ -1391,6 +1391,7 @@ document.addEventListener('click', async (e) => {
       if (falta && !confirm(`Faltam ${falta} item(ns) sem marcar. Concluir mesmo assim?`)) return;
     }
     vis.concluida = !vis.concluida;
+    vis.concluidaEm = vis.concluida ? agora() : '';
     tocar();
     await salvarAgora();
     return desenhar();
