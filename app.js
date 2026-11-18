@@ -208,7 +208,7 @@ async function salvarAgora() {
 }
 
 // ---------- fotos: reduz no aparelho antes de guardar/enviar ----------
-const LADO_MAX = 1600; // px do lado maior; ~250-450 KB em JPEG 0.8
+const LADO_MAX = 1280; // px do lado maior; ~150-250 KB em JPEG 0.75 (bom para relatório e 3x mais leve para enviar)
 async function carregarImagem(file) {
   try {
     return await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -244,7 +244,7 @@ async function comprimir(file) {
   g.fillStyle = '#fff';
   g.textBaseline = 'middle';
   g.fillText(txt, w - tw - fs / 2, h - fs * 0.95);
-  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.8));
+  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.75));
 }
 
 // Versão menor só para o PDF (o arquivo inteiro vai num POST ao Apps Script).
@@ -252,7 +252,7 @@ async function miniaturaDataURL(blob) {
   const bmp = await carregarImagem(blob);
   const w0 = bmp.width || bmp.naturalWidth;
   const h0 = bmp.height || bmp.naturalHeight;
-  const k = Math.min(1, 900 / Math.max(w0, h0));
+  const k = Math.min(1, 700 / Math.max(w0, h0));
   const c = document.createElement('canvas');
   c.width = Math.round(w0 * k);
   c.height = Math.round(h0 * k);
@@ -335,6 +335,9 @@ let timerSync = null;
 let statusSync = '';
 let precisaCodigo = false;
 let ultimoErro = '';
+let inicioSync = 0; // quando a rodada atual começou
+let rodadaSync = 0;
+let progresso = ''; // "foto 2/5", mostrado no topo
 
 function agendarSync() {
   clearTimeout(timerSync);
@@ -348,14 +351,25 @@ async function pendentes() {
   return { vs, fs };
 }
 
+// Três fotos ao mesmo tempo: o gargalo é a ida e volta ao Apps Script (1 a 2 s), não a largura de banda.
 async function enviarFotosDe(vid, ids) {
-  for (const fid of ids) {
-    const f = await fotoGet(fid);
-    if (!f || !f.blob) continue;
-    await Api.foto(vid, fid, await blobParaB64(f.blob));
-    f.enviada = true;
-    await fotoPut(f);
-  }
+  let proxima = 0;
+  let feitas = 0;
+  const trabalhador = async () => {
+    while (proxima < ids.length) {
+      const fid = ids[proxima++];
+      const f = await fotoGet(fid);
+      if (f && f.blob) {
+        await Api.foto(vid, fid, await blobParaB64(f.blob));
+        f.enviada = true;
+        await fotoPut(f);
+      }
+      feitas++;
+      progresso = `foto ${feitas}/${ids.length}`;
+      atualizarTopoSync();
+    }
+  };
+  await Promise.all([trabalhador(), trabalhador(), trabalhador()]);
 }
 
 // HTML do relatório com as fotos embutidas (data: URI) — o Apps Script converte em PDF.
@@ -388,9 +402,14 @@ function logoPng() {
 }
 
 async function sincronizar() {
-  if (sincronizando || !navigator.onLine) return atualizarTopoSync();
+  // Uma rodada presa (a rede caiu no meio) não pode travar as seguintes: passados 4 min, recomeça.
+  if (sincronizando && Date.now() - inicioSync < 4 * 60 * 1000) return atualizarTopoSync();
+  if (!navigator.onLine) return atualizarTopoSync();
   if (!Api.temToken()) { precisaCodigo = true; return atualizarTopoSync(); }
+  const minha = ++rodadaSync;
   sincronizando = true;
+  inicioSync = Date.now();
+  progresso = '';
   statusSync = 'enviando…';
   atualizarTopoSync();
   try {
@@ -405,15 +424,24 @@ async function sincronizar() {
         const { _sync, ...doc } = v;
         const { faltam } = await Api.salvar(doc);
         await enviarFotosDe(v.id, [...new Set([...(faltam || []), ...fotosPend])]);
+        // Dados e fotos já estão no servidor: marca como enviado AGORA. O PDF vem depois e não segura o resto.
+        const a1 = await bdGet(v.id);
+        if (a1 && a1.atualizadoEm === versao) {
+          a1._sync = { ...(a1._sync || {}), sujo: false, enviadoEm: agora() };
+          await bdPut(a1);
+          if (vis && vis.id === a1.id) { vis._sync = a1._sync; }
+        }
       }
-      let pdf = {};
-      if (v.concluida) pdf = await Api.pdf(v.id, await htmlParaPdf(v));
-      // Só marca como enviada se ninguém editou no meio do envio.
-      const atual = await bdGet(v.id);
-      if (atual && atual.atualizadoEm === versao) {
-        atual._sync = { sujo: false, enviadoEm: agora(), pdfDe: v.concluida ? versao : undefined, pdfUrl: pdf.url || (atual._sync || {}).pdfUrl };
-        await bdPut(atual);
-        if (vis && vis.id === atual.id) vis._sync = atual._sync;
+      if (v.concluida) {
+        progresso = 'relatório';
+        atualizarTopoSync();
+        const pdf = await Api.pdf(v.id, await htmlParaPdf(v));
+        const a2 = await bdGet(v.id);
+        if (a2 && a2.atualizadoEm === versao) {
+          a2._sync = { ...(a2._sync || {}), pdfDe: versao, pdfUrl: pdf.url || (a2._sync || {}).pdfUrl };
+          await bdPut(a2);
+          if (vis && vis.id === a2.id) vis._sync = a2._sync;
+        }
       }
     }
     statusSync = '';
@@ -430,7 +458,7 @@ async function sincronizar() {
       ultimoErro = e.message;
     }
   } finally {
-    sincronizando = false;
+    if (minha === rodadaSync) { sincronizando = false; progresso = ''; }
     atualizarTopoSync();
     if (tela.nome === 'lista') desenhar();
   }
@@ -443,7 +471,7 @@ async function atualizarTopoSync() {
   const n = vs.length + fs.length;
   let txt;
   if (!navigator.onLine) txt = n ? `sem sinal · ${n} a enviar` : 'sem sinal';
-  else if (sincronizando) txt = 'enviando…';
+  else if (sincronizando) txt = progresso ? `enviando ${progresso}` : 'enviando…';
   else if (precisaCodigo) txt = 'digite o código';
   else if (statusSync === 'falha ao enviar') txt = `falha · ${n} a enviar ↻`;
   else if (n) txt = `${n} a enviar ↻`;

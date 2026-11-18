@@ -9,19 +9,31 @@ const Api = (() => {
   const URL_API = () => window.VISTORIAS_API || '';
   const tokenSalvo = () => localStorage.getItem('vistoriasToken') || '';
 
+  // Sem tempo limite, uma chamada que perde a rede no meio fica pendurada para sempre e trava o envio todo.
+  const LIMITE = { foto: 90000, pdf: 180000, salvar: 60000 }; // ms; as demais, 40 s
   async function chamar(acao, dados = {}) {
     if (!URL_API()) throw new Error('servidor não configurado');
-    const r = await fetch(URL_API(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ acao, token: tokenSalvo(), ...dados }),
-      redirect: 'follow',
-    });
-    if (!r.ok) throw new Error(`${acao}: HTTP ${r.status}`);
-    const j = await r.json();
-    if (j.erro === 'codigo') throw Object.assign(new Error('codigo'), { codigo: true });
-    if (j.erro) throw new Error(j.erro);
-    return j;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), LIMITE[acao] || 40000);
+    try {
+      const r = await fetch(URL_API(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ acao, token: tokenSalvo(), ...dados }),
+        redirect: 'follow',
+        signal: ctrl.signal,
+      });
+      if (!r.ok) throw new Error(`${acao}: HTTP ${r.status}`);
+      const j = await r.json();
+      if (j.erro === 'codigo') throw Object.assign(new Error('codigo'), { codigo: true });
+      if (j.erro) throw new Error(j.erro);
+      return j;
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('o servidor demorou demais (sinal fraco?)');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   return {
