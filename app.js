@@ -338,6 +338,8 @@ let ultimoErro = '';
 let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
+let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
+const VERSAO_APP = 'versão 18/11 · envio rápido';
 
 function agendarSync() {
   clearTimeout(timerSync);
@@ -403,10 +405,11 @@ function logoPng() {
 
 async function sincronizar() {
   // Uma rodada presa (a rede caiu no meio) não pode travar as seguintes: passados 4 min, recomeça.
-  if (sincronizando && Date.now() - inicioSync < 4 * 60 * 1000) return atualizarTopoSync();
+  if (sincronizando && Date.now() - inicioSync < 4 * 60 * 1000) { refazer = true; return atualizarTopoSync(); }
   if (!navigator.onLine) return atualizarTopoSync();
   if (!Api.temToken()) { precisaCodigo = true; return atualizarTopoSync(); }
   const minha = ++rodadaSync;
+  refazer = false;
   sincronizando = true;
   inicioSync = Date.now();
   progresso = '';
@@ -460,6 +463,7 @@ async function sincronizar() {
   } finally {
     if (minha === rodadaSync) { sincronizando = false; progresso = ''; }
     atualizarTopoSync();
+    if (refazer && statusSync !== 'falha ao enviar' && !precisaCodigo) setTimeout(sincronizar, 300); // não fica insistindo se deu erro
     if (tela.nome === 'lista') desenhar();
   }
 }
@@ -910,7 +914,8 @@ async function telaLista() {
     <h2 class="sec">Neste aparelho</h2>
     ${cards.length ? cards.join('') : '<div class="vazio">Nenhuma vistoria ainda.<br>Toque em “Nova vistoria” para começar.</div>'}
     <h2 class="sec">Equipe</h2>
-    <button class="sec" style="width:100%" data-act="equipe">Ver vistorias de todos (precisa de sinal)</button>`;
+    <button class="sec" style="width:100%" data-act="equipe">Ver vistorias de todos (precisa de sinal)</button>
+    <p class="mudo" style="text-align:center;margin-top:14px">${VERSAO_APP}</p>`;
 }
 
 function telaNova() {
