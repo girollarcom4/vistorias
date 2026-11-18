@@ -13,15 +13,17 @@
 
 // ---------- modelo ----------
 const BASE = ['Piso', 'Paredes / pintura', 'Teto / forro', 'Portas', 'Janelas / esquadrias', 'Tomadas e interruptores', 'Iluminação'];
+// Ambientes com rodapé (os banheiros usam revestimento cerâmico, sem rodapé): logo depois do piso.
+const COM_RODAPE = [BASE[0], 'Rodapés', ...BASE.slice(1)];
 // Torneiras, metais, box e bancada/pia são instalados pelo cliente: fora do escopo da vistoria da construtora.
 const MOLHADO = ['Ralos e caimento'];
 const AMBIENTES = [
   // No projeto cozinha e lavação são o mesmo espaço: um ambiente só (evita marcar o mesmo defeito em dois lugares).
-  ['Cozinha e lavação', [...BASE, 'Tanque', ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
-  ['Sala', BASE],
+  ['Cozinha e lavação', [...COM_RODAPE, 'Tanque', ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
+  ['Sala', COM_RODAPE],
   ['Sacada', ['Piso e caimento', 'Guarda-corpo', 'Ralo', 'Paredes / pintura', 'Esquadrias']],
-  ['Quarto 1', BASE],
-  ['Quarto 2', BASE],
+  ['Quarto 1', COM_RODAPE],
+  ['Quarto 2', COM_RODAPE],
   ['Banheiro 1', [...BASE, 'Louças (vaso e lavatório)', 'Revestimento cerâmico', ...MOLHADO]],
   ['Banheiro 2 (suíte)', [...BASE, 'Louças (vaso e lavatório)', 'Revestimento cerâmico', ...MOLHADO]],
 ];
@@ -340,7 +342,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 18/11 · checklist sem itens do cliente';
+const VERSAO_APP = 'versão 18/11 · rodapés no checklist';
 
 function agendarSync() {
   clearTimeout(timerSync);
