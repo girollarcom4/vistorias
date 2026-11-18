@@ -13,16 +13,17 @@
 
 // ---------- modelo ----------
 const BASE = ['Piso', 'Paredes / pintura', 'Teto / forro', 'Portas', 'Janelas / esquadrias', 'Tomadas e interruptores', 'Iluminação'];
-const MOLHADO = ['Torneira e sifão', 'Ralos e caimento'];
+// Torneiras, metais, box e bancada/pia são instalados pelo cliente: fora do escopo da vistoria da construtora.
+const MOLHADO = ['Ralos e caimento'];
 const AMBIENTES = [
   // No projeto cozinha e lavação são o mesmo espaço: um ambiente só (evita marcar o mesmo defeito em dois lugares).
-  ['Cozinha e lavação', [...BASE, 'Bancada / pia', 'Tanque', ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
+  ['Cozinha e lavação', [...BASE, 'Tanque', ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
   ['Sala', BASE],
   ['Sacada', ['Piso e caimento', 'Guarda-corpo', 'Ralo', 'Paredes / pintura', 'Esquadrias']],
   ['Quarto 1', BASE],
   ['Quarto 2', BASE],
-  ['Banheiro 1', [...BASE, 'Louças (vaso e lavatório)', 'Metais e registros', 'Box / vidro', 'Revestimento cerâmico', ...MOLHADO]],
-  ['Banheiro 2 (suíte)', [...BASE, 'Louças (vaso e lavatório)', 'Metais e registros', 'Box / vidro', 'Revestimento cerâmico', ...MOLHADO]],
+  ['Banheiro 1', [...BASE, 'Louças (vaso e lavatório)', 'Revestimento cerâmico', ...MOLHADO]],
+  ['Banheiro 2 (suíte)', [...BASE, 'Louças (vaso e lavatório)', 'Revestimento cerâmico', ...MOLHADO]],
 ];
 const { contar, pendentesDe, relatorioHTML, fotosDoRelatorio, TIPO } = Relatorio;
 
@@ -339,7 +340,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 18/11 · cozinha e lavação juntas';
+const VERSAO_APP = 'versão 18/11 · checklist sem itens do cliente';
 
 function agendarSync() {
   clearTimeout(timerSync);
