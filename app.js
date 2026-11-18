@@ -15,8 +15,8 @@
 const BASE = ['Piso', 'Paredes / pintura', 'Teto / forro', 'Portas', 'Janelas / esquadrias', 'Tomadas e interruptores', 'Iluminação'];
 const MOLHADO = ['Torneira e sifão', 'Ralos e caimento'];
 const AMBIENTES = [
-  ['Cozinha', [...BASE, 'Bancada / pia', ...MOLHADO, 'Ponto de gás']],
-  ['Lavação', [...BASE, 'Tanque', ...MOLHADO, 'Ponto da máquina de lavar']],
+  // No projeto cozinha e lavação são o mesmo espaço: um ambiente só (evita marcar o mesmo defeito em dois lugares).
+  ['Cozinha e lavação', [...BASE, 'Bancada / pia', 'Tanque', ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
   ['Sala', BASE],
   ['Sacada', ['Piso e caimento', 'Guarda-corpo', 'Ralo', 'Paredes / pintura', 'Esquadrias']],
   ['Quarto 1', BASE],
@@ -339,7 +339,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 18/11 · relatório maior + aviso de atualização';
+const VERSAO_APP = 'versão 18/11 · cozinha e lavação juntas';
 
 function agendarSync() {
   clearTimeout(timerSync);
