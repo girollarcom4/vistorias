@@ -82,8 +82,7 @@
         const vazio = !defs.length && !oks.length && !(a.obs || '').trim() && !(a.fotos || []).length;
         if (vazio) { vazios.push(a.nome); return ''; } // ambiente sem nada marcado não vira linha repetida no relatório
         return `<div class="amb"><h3>${esc(a.nome)}</h3>
-          ${defs.length ? `<table class="def"><thead><tr><th style="width:30%">Defeito apontado</th><th>Observação</th></tr></thead><tbody>${defs
-            .map((i) => `<tr><td><b>${esc(i.nome)}</b></td><td>${esc(i.obs || '—')}${grade(minhas(i.fotos))}</td></tr>`).join('')}</tbody></table>` : ''}
+          ${defs.length ? `<table class="def misto"><thead><tr><th style="width:30%">Defeito apontado</th><th>Observação</th></tr></thead>${defs.map((i) => `<tbody class="par"><tr><td><b>${esc(i.nome)}</b></td><td>${esc(i.obs || '—')}</td></tr><tr><td colspan="2" class="linha-fotos">${grade(minhas(i.fotos)) || '<span class="mudo">Sem foto.</span>'}</td></tr></tbody>`).join('')}</table>` : ''}
           ${oks.length ? `<p class="ok"><b>Conforme:</b> ${oks.join(' · ')}</p>` : ''}
           ${nas ? `<p class="mudo">${nas} item(ns) não se aplica(m).</p>` : ''}
           ${pend ? `<p class="mudo">${pend} item(ns) não vistoriado(s).</p>` : ''}
@@ -120,6 +119,7 @@
   .fotos{margin:6px 0 0} .fotos img{height:240px;margin:0 6px 6px 0;border:1px solid #d1d5db;vertical-align:top}
   table.assinaturas{width:100%;margin-top:24px;page-break-inside:avoid} .assin{text-align:center;padding:0 14px;vertical-align:bottom}
   .assin img{max-height:64px;max-width:100%} .assin .vaz{height:56px} .assin .nome{border-top:1px solid #111;padding-top:3px;font-size:11px}
+  .misto tbody.par{page-break-inside:avoid} .misto .linha-fotos{padding:6px 0 0 6px} .misto .fotos{margin:0;font-size:0} .misto .fotos img{height:208px;margin:0 6px 6px 0}
   .rodape{margin-top:16px;color:#6b7280;font-size:10px;text-align:center}
   .barra{text-align:right;padding:8px 10px;background:#eef0f3} .barra button{background:#1f2f4a;color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;margin-left:6px}
   @media print{.barra{display:none}@page{size:A4;margin:12mm}}

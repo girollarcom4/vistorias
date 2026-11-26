@@ -342,7 +342,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 18/11 · rodapés no checklist';
+const VERSAO_APP = 'versão 26/11 · relatório com fotos na largura toda';
 
 function agendarSync() {
   clearTimeout(timerSync);
