@@ -342,7 +342,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 27/11 · cozinha sem portas e tanque';
+const VERSAO_APP = 'versão 27/11 · restantes ok e aviso ao concluir';
 
 function agendarSync() {
   clearTimeout(timerSync);
@@ -961,6 +961,31 @@ function blocoFotos(alvo, lista) {
 }
 const fotosSoLeitura = (refs) => (refs && refs.length ? `<div class="fotos">${refs.map((r) => `<div class="f"><img data-foto="${r.fid}" data-vid="${r.vid}" alt=""></div>`).join('')}</div>` : '');
 
+// Avisos ao concluir. Nunca bloqueiam: quem vistoria decide se conclui assim mesmo.
+function avisosDeConclusao(v) {
+  const av = [];
+  const c = contar(v);
+  if (c.tot - c.feitos > 0) av.push(`${c.tot - c.feitos} item(ns) ainda sem marcar`);
+  const lista = (nomes) => (nomes.length > 4 ? `${nomes.slice(0, 4).join('; ')} e mais ${nomes.length - 4}` : nomes.join('; '));
+  const vazio = (x) => !String(x || '').trim();
+  if (v.tipo === 'revistoria') {
+    const sem = (cond, rotulo) => {
+      const n = [...(v.revisao || []).filter(cond).map((r) => `${r.ambiente} · ${r.item}`), ...(v.novos || []).filter(cond).map((x) => `${x.ambiente} · ${x.nome}`)];
+      if (n.length) av.push(`${n.length} ${rotulo}: ${lista(n)}`);
+    };
+    sem((x) => x.estado && x.estado !== 'corrigido' && vazio(x.obs), 'item(ns) sem dizer o que ainda falta corrigir');
+    sem((x) => (x.estado || x.nome) && !(x.fotos || []).length, 'item(ns) conferido(s) sem foto');
+    return av;
+  }
+  const defeitos = [];
+  for (const a of v.ambientes || []) for (const i of a.itens || []) if (i.estado === 'defeito') defeitos.push({ rotulo: `${a.nome} · ${i.nome}`, i });
+  const semTexto = defeitos.filter((d) => vazio(d.i.obs)).map((d) => d.rotulo);
+  const semFoto = defeitos.filter((d) => !(d.i.fotos || []).length).map((d) => d.rotulo);
+  if (semTexto.length) av.push(`${semTexto.length} defeito(s) sem descrição: ${lista(semTexto)}`);
+  if (semFoto.length) av.push(`${semFoto.length} defeito(s) sem foto: ${lista(semFoto)}`);
+  return av;
+}
+
 function blocoFinalizar() {
   return `<h2 class="sec">Finalizar</h2>
     <div class="card">
@@ -1050,8 +1075,10 @@ function telaAmbiente() {
       ${i.estado === 'defeito' ? `<div class="defeito"><textarea data-bind="item" data-i="${i.id}" placeholder="Descreva o defeito (onde, tamanho…)">${esc(i.obs)}</textarea>${blocoFotos({ t: 'item', a: a.id, i: i.id }, i.fotos)}
         <div class="acoes">${i.pendenciaId ? '<span class="pill ok">✓ Pendência de obra criada</span>' : `<button class="peq" data-act="pendDeItem" data-i="${i.id}">→ Criar pendência de obra</button>`}</div></div>` : ''}
     </div>`);
+  const restam = a.itens.filter((i) => !i.estado).length;
   $('#tela').innerHTML = `
     <div class="card">${itens.join('')}
+      ${restam && !vis.concluida ? `<button class="sec" style="width:100%;margin-top:12px" data-act="restok">✔ Marcar ${restam === a.itens.length ? `todos os ${restam}` : `os ${restam} restantes`} como Ok</button>` : ''}
       <button class="peq" style="margin-top:10px" data-act="novoitem">+ Adicionar item</button></div>
     <div class="card"><label>Observações do ambiente</label>
       <textarea data-bind="amb" placeholder="Opcional">${esc(a.obs)}</textarea>${blocoFotos({ t: 'amb', a: a.id }, a.fotos)}</div>
@@ -1354,6 +1381,12 @@ document.addEventListener('click', async (e) => {
     tocar();
     return desenhar();
   }
+  if (act === 'restok') {
+    const a = vis.ambientes.find((x) => x.id === tela.a);
+    for (const i of a.itens) if (!i.estado) i.estado = 'ok';
+    tocar();
+    return desenhar();
+  }
   if (act === 'novoitem') {
     const nome = prompt('Nome do item:');
     if (!nome || !nome.trim()) return;
@@ -1389,9 +1422,8 @@ document.addEventListener('click', async (e) => {
   }
   if (act === 'concluir') {
     if (!vis.concluida) {
-      const c = contar(vis);
-      const falta = c.tot - c.feitos;
-      if (falta && !confirm(`Faltam ${falta} item(ns) sem marcar. Concluir mesmo assim?`)) return;
+      const av = avisosDeConclusao(vis);
+      if (av.length && !confirm(`Antes de concluir:\n\n${av.map((x) => '• ' + x).join('\n')}\n\nConcluir mesmo assim?`)) return;
     }
     vis.concluida = !vis.concluida;
     vis.concluidaEm = vis.concluida ? agora() : '';
