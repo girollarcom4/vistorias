@@ -19,7 +19,7 @@ const COM_RODAPE = [BASE[0], 'Rodapés', ...BASE.slice(1)];
 const MOLHADO = ['Ralos e caimento'];
 const AMBIENTES = [
   // No projeto cozinha e lavação são o mesmo espaço: um ambiente só (evita marcar o mesmo defeito em dois lugares).
-  ['Cozinha e lavação', [...COM_RODAPE, 'Tanque', ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
+  ['Cozinha e lavação', [...COM_RODAPE.filter((i) => i !== 'Portas'), ...MOLHADO, 'Ponto de gás', 'Ponto da máquina de lavar']],
   ['Sala', COM_RODAPE],
   ['Sacada', ['Piso e caimento', 'Guarda-corpo', 'Ralo', 'Paredes / pintura', 'Esquadrias']],
   ['Quarto 1', COM_RODAPE],
@@ -342,7 +342,7 @@ let inicioSync = 0; // quando a rodada atual começou
 let rodadaSync = 0;
 let progresso = ''; // "foto 2/5", mostrado no topo
 let refazer = false; // algo mudou durante um envio: roda de novo assim que ele termina
-const VERSAO_APP = 'versão 26/11 · relatório com fotos na largura toda';
+const VERSAO_APP = 'versão 27/11 · cozinha sem portas e tanque';
 
 function agendarSync() {
   clearTimeout(timerSync);
